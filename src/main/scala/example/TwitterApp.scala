@@ -30,16 +30,18 @@ object TwitterApp extends App{
 
   val appName = "TwitterData"
   val conf = new SparkConf().setAppName(appName).setMaster("local[*]")
-    .set("spark.network.timeout", "100s")
-    .set("spark.executor.heartbeatInterval", "50s")
+    .set("spark.network.timeout", "20s")
+    .set("spark.executor.heartbeatInterval", "10s")
 
   val ssc = new StreamingContext(conf, Seconds(5))
 
   val twits: ReceiverInputDStream[Status] = TwitterUtils.createStream(ssc, None)
-  twits.start()
-  
 
-  twits.map(_.getText).print()
+
+  twits.map(_.getText).saveAsTextFiles("twits-", "twits.txt")
+
+  twits.start()
+  ssc.start()
 
   ssc.awaitTermination()
   ssc.stop()
