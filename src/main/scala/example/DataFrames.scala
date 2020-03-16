@@ -35,15 +35,16 @@ object DataFrames {
 
 
 
-
+//
 //   val schema = StructType(
 //    StructField("movieId", IntegerType, false) ::
 //      StructField("rating", DoubleType, false) :: Nil)
-   //spark.createDataFrame(ratings, schema)
+//   spark.createDataFrame(ratings)
 
   //implicit val encoder =  Encoders.tuple(Encoders.INT, Encoders.DOUBLE)
 
   val ratingsDs = ratings.toDS()
+
 
    ratingsDs.printSchema()
    ratingsDs.createOrReplaceTempView("ratings")
