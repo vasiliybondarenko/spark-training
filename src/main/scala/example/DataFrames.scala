@@ -33,16 +33,6 @@ object DataFrames {
   import spark.implicits._
 
 
-
-
-//
-//   val schema = StructType(
-//    StructField("movieId", IntegerType, false) ::
-//      StructField("rating", DoubleType, false) :: Nil)
-//   spark.createDataFrame(ratings)
-
-  //implicit val encoder =  Encoders.tuple(Encoders.INT, Encoders.DOUBLE)
-
   val ratingsDs = ratings.toDS()
 
 

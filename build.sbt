@@ -8,7 +8,7 @@ lazy val root = (project in file(".")).settings(
   ),
   name := "spark-training",
   resolvers += Resolver.mavenLocal,
-  mainClass in assembly := Some("example.wiki.spark.SparkCluster"),
+  mainClass in assembly := Some("example.SimpleSparkJob"),
   assemblyMergeStrategy in assembly := {
     case PathList("META-INF", xs @ _*) => MergeStrategy.discard
     case x => MergeStrategy.first
