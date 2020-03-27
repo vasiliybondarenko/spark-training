@@ -27,7 +27,7 @@ object SimpleSparkJob extends Logging{
        StructField("text", StringType, true) :: Nil
      )
    val messagesRdd = spark.sparkContext.parallelize(Range(0, 10000)).map(_.toString)
-   val df = spark.createDataFrame(messagesRdd.map(Row(_)), messagesSchema)
+   //val df = spark.createDataFrame(messagesRdd.map(Row(_)), messagesSchema)
 
 
    val rdd = spark.sparkContext.parallelize(Range(0, 10000))
