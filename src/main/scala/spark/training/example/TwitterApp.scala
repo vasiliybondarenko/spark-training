@@ -3,7 +3,7 @@ package spark.training.example
 import org.apache.log4j.{ Level, Logger }
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{ Row, SparkSession }
+import org.apache.spark.sql.{ DataFrame, Row, SaveMode, SparkSession }
 import org.apache.spark.sql.types.{ DecimalType, DoubleType, IntegerType, StringType, StructField, StructType }
 import org.apache.spark.streaming.dstream.{ DStream, ReceiverInputDStream }
 import org.apache.spark.streaming.twitter.TwitterUtils
@@ -21,6 +21,10 @@ object TwitterApp {
 
   Logger.getLogger("org").setLevel(Level.ERROR)
 
+  //todo:
+  // CREATE TABLE IF NOT EXISTS twits ( latitude decimal, longitude decimal, country string, place string, text string ) LOCATION 'hdfs://sandbox-hdp.hortonworks.com/user/shredinger/output/test/twits'
+
+
   private def initSystemProperties(args: Array[String]) = {
     val path = if(args.length >= 1) args(0) else "twitter.txt"
 
@@ -29,16 +33,6 @@ object TwitterApp {
       .collect { case propName :: propValue :: Nil => s"twitter4j.oauth.$propName" -> propValue }
       .foreach { case (key, value) => System.setProperty(key, value) }
   }
-
-  private def writeToHive(session: SparkSession)(stream: DStream[(Long, String)]) = {
-    stream.saveAsTextFiles("", "")
-
-    stream.foreachRDD { rdd =>
-      println(s"SAVING RDD ...")
-      saveRDD(session, rdd)
-    }
-  }
-
 
 
   private def saveRDD(session: SparkSession, rdd: RDD[(Long, String)]) = {
@@ -65,27 +59,37 @@ object TwitterApp {
 
 
 
-  def createSession(conf: SparkConf) = {
-    //val warehouseLocation = "s3://ervin-shredinger/output-data/twits-d1"
-    val warehouseLocation = "/Users/shredinger/Documents/DEVELOPMENT/dev-tools/spark/spark-warehouse"
+  def createSession(conf: SparkConf, warehouseLocation: String) = {
+
     SparkSession
       .builder
       .config(conf)
       .config("spark.sql.warehouse.dir", warehouseLocation)
+      .config("spark.sql.parquet.cacheMetadata", false)
       .enableHiveSupport()
       .getOrCreate()
+  }
+
+  def writeToHdfs(df: DataFrame, hdfsDataDir: String, tableName: String) = {
+    df.write
+      .mode(SaveMode.Append)
+      .option("path", s"${hdfsDataDir}/$tableName")
+      .format("hive")
+      .saveAsTable(tableName)
   }
 
 
   def twitterJob(args: Array[String]) = {
     initSystemProperties(args)
 
+    val warehouseLocation = "hdfs://sandbox-hdp.hortonworks.com/user/shredinger/output/twits"
+
     val conf = new SparkConf().setAppName("TwitterData").setMaster("local[*]")
       .set("spark.network.timeout", "20s")
       .set("spark.executor.heartbeatInterval", "10s")
 
 
-    val session = createSession(conf)
+    val session = createSession(conf, warehouseLocation)
     import session.implicits._
 
 
@@ -102,17 +106,6 @@ object TwitterApp {
 
 
     val twits: ReceiverInputDStream[Status] = TwitterUtils.createFilteredStream(ssc, None, Some(query))
-
-    val hdfsPath = "hdfs://sandbox-hdp.hortonworks.com/user/zeppelin/data/twits"
-    val localPath = s"twits/twit_data"
-
-    session.sql("DROP TABLE IF EXISTS twits")
-    session.sql(
-      """
-        |CREATE TABLE twits ( latitude decimal, longitude decimal, country string, place string, text string )
-        |STORED AS TEXTFILE
-        |""".stripMargin
-    )
 
     val twitsSchema =
       StructType(
@@ -147,12 +140,9 @@ object TwitterApp {
       )
 
 
-
-      df.createOrReplaceTempView("t_twits")
-
+      writeToHdfs(df, warehouseLocation, "twits0")
 
 
-      session.sql("INSERT INTO TABLE twits SELECT * FROM t_twits")
     }
 
     twits.start()
@@ -164,87 +154,10 @@ object TwitterApp {
   }
 
 
-  def experiment(args: Array[String]) = {
-    import org.apache.spark.sql.types.{StringType, IntegerType, StructField, StructType }
-    import org.apache.spark.sql.{ Row, SparkSession }
-    import org.apache.spark.SparkConf
-    import org.apache.spark.sql._
-
-    def createDF(seq: =>Seq[Int])(spark: SparkSession) = {
-      val schema =
-        StructType(
-          StructField("id", IntegerType, true) :: Nil
-        )
-
-      spark.createDataFrame(
-        spark.sparkContext.parallelize(seq).map(Row(_)),
-        schema
-      )
-    }
-
-
-    val warehouseDir = "/Users/shredinger/Documents/DEVELOPMENT/dev-tools/spark/spark-warehouse/"
-    val hdfsDataDir = "hdfs://sandbox-hdp.hortonworks.com/warehouse/temp/"
-
-    val spark = SparkSession.builder().master("local").appName("Spark Hive Example").config("spark.sql.warehouse.dir", s"${hdfsDataDir}").config("spark.sql.parquet.cacheMetadata", false).enableHiveSupport().getOrCreate()
-
-    import spark.implicits._
-    import spark.sql
-
-    val dataDir = "/Users/shredinger/Documents/DEVELOPMENT/dev-tools/spark/spark-warehouse/numbers"
-
-//    spark
-//      .sparkContext
-//      .textFile("hdfs://sandbox-hdp.hortonworks.com/warehouse/temp/logs/hadoop-hdfs-datanode-sandbox-hdp.hortonworks.com.log.txt")
-//      .count()
-    
-                                                
-
-//    createDF(0 to 100)(spark)
-//      .write
-//      .mode(SaveMode.Append)
-//      .format("hive")
-//      .saveAsTable("ints")
-
-    createDF(0 to 100)(spark).write.mode(SaveMode.Append).format("hive").saveAsTable(s"ints")
-      
-    
-
-
-    //spark.catalog.refreshTable("ints")
-
-    spark.stop()
-
-  }
 
   def main(args: Array[String]): Unit = {
 
-//    val warehouseLocation = "/Users/shredinger/Documents/DEVELOPMENT/dev-tools/spark/spark-warehouse/"
-//
-//    val spark = SparkSession
-//      .builder()
-//      .master("local")
-//      .appName("Spark Hive Example")
-//      .config("spark.sql.warehouse.dir", warehouseLocation)
-//      .enableHiveSupport()
-//      .getOrCreate()
-//
-//    import spark.implicits._
-//    import spark.sql
-//
-//    sql("CREATE TABLE IF NOT EXISTS default.ids (id INT) USING hive")
-//
-//
-//
-//
-//
-//
-//    spark.stop()
-
-
-
-    experiment(args)
-
+     twitterJob(args)
 
   }
 

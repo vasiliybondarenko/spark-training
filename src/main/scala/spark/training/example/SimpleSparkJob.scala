@@ -16,7 +16,6 @@ object SimpleSparkJob extends Logging with Utils {
     .builder()
     .master("local")
     .config(new SparkConf())
-    .config("dfs.client.use.datanode.hostname", true)
     .appName("test data frames")
     .getOrCreate()
 
@@ -33,6 +32,9 @@ object SimpleSparkJob extends Logging with Utils {
   // sudo -u hdfs hdfs dfs -copyFromLocal /tmp/datanode.log.txt hdfs://sandbox-hdp.hortonworks.com/user/shredinger/datanode.log.txt
   // HADOOP configs:
   // ls -alGh /etc/hadoop/3.0.1.0-187/0/
+
+  //in zeppeling:
+  // CREATE EXTERNAL TABLE IF NOT EXISTS ints(id int) LOCATION 'hdfs://sandbox-hdp.hortonworks.com/user/shredinger/output/test/ints'
 
 
 
