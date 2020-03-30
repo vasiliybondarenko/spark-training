@@ -1,6 +1,7 @@
 package spark.training.example
 
 import example.Logging
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.types.{ IntegerType, StringType, StructField, StructType }
 import org.apache.spark.sql.{ Row, SparkSession }
 
@@ -9,35 +10,31 @@ import org.apache.spark.sql.{ Row, SparkSession }
  *11:12.
  *Project: spark-training
  */
-object SimpleSparkJob extends Logging{
+object SimpleSparkJob extends Logging with Utils {
  def main(args: Array[String]): Unit = {
   val spark = SparkSession
     .builder()
+    .master("local")
+    .config(new SparkConf())
+    .config("dfs.client.use.datanode.hostname", true)
     .appName("test data frames")
     .getOrCreate()
 
 
-  val schema =
-       StructType(
-             StructField("id", IntegerType, true) :: Nil
-       )
-
-   val messagesSchema =
-     StructType(
-       StructField("text", StringType, true) :: Nil
-     )
-   val messagesRdd = spark.sparkContext.parallelize(Range(0, 10000)).map(_.toString)
-   //val df = spark.createDataFrame(messagesRdd.map(Row(_)), messagesSchema)
-
-
-   val rdd = spark.sparkContext.parallelize(Range(0, 10000))
+  spark.sparkContext.textFile("hdfs://sandbox-hdp.hortonworks.com/user/shredinger/datanode.log.txt").count()
+    .show(c => s"COUNT: $c")
 
 
 
-   val df = spark.createDataFrame(rdd.map(Row(_)), schema)
-   df.foreach(logger.warn(_))
+  //before run:
+  // sudo -u hdfs hdfs dfs -mkdir /user/shredinger
+  // sudo -u hdfs hdfs dfs -chown shredinger /user/shredinger
+  // docker cp ~/Downloads/datanode.log.txt sandbox-hdp:/tmp
+  // sudo -u hdfs hdfs dfs -copyFromLocal /tmp/datanode.log.txt hdfs://sandbox-hdp.hortonworks.com/user/shredinger/datanode.log.txt
+  // HADOOP configs:
+  // ls -alGh /etc/hadoop/3.0.1.0-187/0/
 
-   //df.write.csv("s3://ervin-shredinger/output-data")
+
 
 
 

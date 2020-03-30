@@ -395,7 +395,7 @@
 
 	<property>
       <name>yarn.resourcemanager.address</name>
-      <value>sandbox-hdp.hortonworks.com:8050</value>
+      <value>sandbox-hdp.hortonworks.com:8032</value>
     </property>
 
     <property>

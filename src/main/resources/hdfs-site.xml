@@ -42,9 +42,16 @@
     
     <property>
       <name>dfs.datanode.address</name>
-      <value>0.0.0.0:50010</value>
+      <value>sandbox-hdp.hortonworks.com:50010</value>
     </property>
-    
+
+      <property>
+          <name>dfs.client.use.datanode.hostname</name>
+          <value>true</value>
+      </property>
+
+
+
     <property>
       <name>dfs.datanode.balance.bandwidthPerSec</name>
       <value>6250000</value>
