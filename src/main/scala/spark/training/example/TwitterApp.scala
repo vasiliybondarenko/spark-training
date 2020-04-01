@@ -4,12 +4,14 @@ import org.apache.log4j.{ Level, Logger }
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{ DataFrame, Row, SaveMode, SparkSession }
-import org.apache.spark.sql.types.{ DecimalType, DoubleType, IntegerType, StringType, StructField, StructType }
+import org.apache.spark.sql.types.{ BooleanType, DecimalType, DoubleType, IntegerType, LongType, StringType, StructField, StructType }
 import org.apache.spark.streaming.dstream.{ DStream, ReceiverInputDStream }
 import org.apache.spark.streaming.twitter.TwitterUtils
-import org.apache.spark.streaming.{ Seconds, StreamingContext }
+import org.apache.spark.streaming.{ Minutes, Seconds, StreamingContext }
+import org.joda.time.{ DateTime, LocalDate, LocalDateTime }
 import twitter4j.{ FilterQuery, Status }
 import java.io.File
+import java.util.{ Calendar, Date }
 import scala.io.Source
 
 /**
@@ -23,6 +25,7 @@ object TwitterApp {
 
   //todo:
   // CREATE TABLE IF NOT EXISTS twits ( latitude decimal, longitude decimal, country string, place string, text string ) LOCATION 'hdfs://sandbox-hdp.hortonworks.com/user/shredinger/output/test/twits'
+  // CREATE EXTERNAL TABLE IF NOT EXISTS popular_twits ( country string, twit string, quotesCount bigint ) LOCATION 'hdfs://sandbox-hdp.hortonworks.com/user/shredinger/output/twits/popular_twits'
 
 
   private def initSystemProperties(args: Array[String]) = {
@@ -72,15 +75,26 @@ object TwitterApp {
 
   def writeToHdfs(df: DataFrame, hdfsDataDir: String, tableName: String) = {
     df.write
-      .mode(SaveMode.Append)
+      .mode(SaveMode.Overwrite)
       .option("path", s"${hdfsDataDir}/$tableName")
       .format("hive")
       .saveAsTable(tableName)
   }
 
 
+  private def saveStream[K, V](spark: SparkSession, warehouseLocation: String, tableName: String)(stream: DStream[(K, V)])(schema: StructType)(func: (K, V) => Row) = {
+    stream.foreachRDD { (rdd, time) =>
+      println(s"TIME: ${new DateTime(new Date(time.milliseconds)).toLocalTime.toString("hh:mm:ss")}")
+      val df = spark.createDataFrame(rdd.map { case (k, v) => func(k, v) }, schema)
+      writeToHdfs(df, warehouseLocation, tableName)
+    }
+  }
+
   def twitterJob(args: Array[String]) = {
+    import Math.max
+
     initSystemProperties(args)
+
 
     val warehouseLocation = "hdfs://sandbox-hdp.hortonworks.com/user/shredinger/output/twits"
 
@@ -90,60 +104,87 @@ object TwitterApp {
 
 
     val session = createSession(conf, warehouseLocation)
+    
+
     import session.implicits._
 
 
-    val ssc = new StreamingContext(session.sparkContext, Seconds(5))
+    val ssc = new StreamingContext(session.sparkContext, Seconds(20))
+    ssc.checkpoint(s"$warehouseLocation/checkpoint")
 
 
     val locations = {
-      val nycSouthWest = Array(-10.0, 53.0)
-      val nycNorthEast = Array(30.0, 54.0)
+      val nycSouthWest = Array(-180.0, -90.0)
+      val nycNorthEast = Array(180.0, 90.0)
       Array(nycSouthWest, nycNorthEast)
     }
     val query = new FilterQuery().locations(locations: _*)
-      .language("en")
+      .language("ru", "en")
+
 
 
     val twits: ReceiverInputDStream[Status] = TwitterUtils.createFilteredStream(ssc, None, Some(query))
 
+
     val twitsSchema =
       StructType(
-        StructField("latitude", DoubleType, true) ::
-          StructField("longitude", DoubleType, true) ::
+        StructField("favourites", IntegerType, true) ::
+          StructField("retweets", IntegerType, true) ::
           StructField("country", StringType, true) ::
-          StructField("place", StringType, true) ::
-          StructField("text", StringType, true) :: Nil
+          StructField("text", StringType, true) ::
+          StructField("isRetweet", BooleanType, true) ::
+          StructField("quotedStatusId", LongType, true) ::
+          StructField("retweetedStatusId", LongType, true) ::
+          StructField("retweetText", StringType, true) ::
+          StructField("retweetCountry", StringType, true) :: Nil
       )
 
+    type TWIT =  (Long, (Int, Int, Option[String], String))
 
-    twits
+    val shortTwits = twits.filter { t =>
+      Option(t.getQuotedStatus).isDefined
+    }
       .map(t =>
         t.getId -> (
-          Option(t.getGeoLocation).map(_.getLatitude),
-          Option(t.getGeoLocation).map(_.getLongitude),
+          t.getFavoriteCount,
+          t.getRetweetCount,
           Option(t.getPlace).map(_.getCountry),
-          Option(t.getPlace).map(_.getFullName),
-          t.getText
+          t.getText,
+          t.isRetweet,
+          t.getQuotedStatusId,
+          Option(t.getRetweetedStatus).map(_.getId).getOrElse(-1L),
+          Option(t.getQuotedStatus).map(_.getText).getOrElse(""),
+          Option(t.getRetweetedStatus).flatMap(t => Option(t.getPlace)).map(_.getCountry).getOrElse("")
         )
-      ).foreachRDD { (rdd, time) =>
-
-      val df = session.createDataFrame(
-        rdd.map { case (_, (latitude, longitude, country, place, text)) => Row(
-          latitude.getOrElse(0.0),
-          longitude.getOrElse(0.0),
-          country.getOrElse(""),
-          place.getOrElse(""),
-          text)
-        },
-        twitsSchema
       )
 
+    val mostPopularTwitsSchema =
+      StructType(
+        StructField("country", StringType, true) ::
+        StructField("twit", StringType, true) ::
+        StructField("quotesCount", LongType, true) :: Nil
+      )
 
-      writeToHdfs(df, warehouseLocation, "twits0")
+    def maxCount(a: (String, Long), b: (String, Long)): (String, Long) = if(a._1 > b._1) a else b
 
+    val windowDuration = Minutes(60)
+    val slideDuration = Minutes(10)
 
+    val mostPopularTwits = twits
+      .map(t =>
+        Option(t.getPlace).map(_.getCountry).getOrElse("") ->  Option(t.getQuotedStatus).map(_.getText).getOrElse("")
+      ).countByValueAndWindow(windowDuration, windowDuration)
+      .map { case ((country, quotedTwit), count) => country -> (quotedTwit, count) }
+      .reduceByKeyAndWindow(maxCount(_, _), windowDuration, slideDuration)
+
+    saveStream(session, warehouseLocation, "popular_twits1")(mostPopularTwits)(mostPopularTwitsSchema) {
+      case (country, (twit, count)) => Row(country, twit, count)
     }
+
+//    saveStream(session, warehouseLocation, "retweets")(shortTwits)(twitsSchema) {
+//      case (_, (favourites, retweets, country, text, isRetweet, quotedId, retweetedId, retweetText, retweetCountry)) =>
+//        Row(favourites, retweets, country.getOrElse("N/A"), text, isRetweet, quotedId, retweetedId, retweetText, retweetCountry)
+//    }
 
     twits.start()
     ssc.start()
@@ -152,8 +193,6 @@ object TwitterApp {
     ssc.awaitTermination()
     ssc.stop()
   }
-
-
 
   def main(args: Array[String]): Unit = {
 
