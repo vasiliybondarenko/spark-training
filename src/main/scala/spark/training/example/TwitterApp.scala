@@ -173,7 +173,7 @@ object TwitterApp {
     val mostPopularTwits = twits
       .map(t =>
         Option(t.getPlace).map(_.getCountry).getOrElse("") ->  Option(t.getQuotedStatus).map(_.getText).getOrElse("")
-      ).countByValueAndWindow(windowDuration, windowDuration)
+      ).countByValueAndWindow(windowDuration, slideDuration)
       .map { case ((country, quotedTwit), count) => country -> (quotedTwit, count) }
       .reduceByKeyAndWindow(maxCount(_, _), windowDuration, slideDuration)
 
