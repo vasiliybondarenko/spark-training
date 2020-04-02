@@ -37,31 +37,6 @@ object TwitterApp {
       .foreach { case (key, value) => System.setProperty(key, value) }
   }
 
-
-  private def saveRDD(session: SparkSession, rdd: RDD[(Long, String)]) = {
-    import org.apache.spark.sql._
-    import org.apache.spark.sql.types._
-
-
-    val schema =
-      StructType(
-        StructField("id", LongType, false) ::
-          StructField("text", StringType, true) :: Nil)
-
-
-    val sqlContext = session.sqlContext
-    val df = sqlContext.createDataFrame(rdd.map(v => Row(v._1, v._2)), schema)
-
-    df
-      .write
-      .format("hive")
-      .mode(SaveMode.Append)
-      .saveAsTable("default.twits")
-  }
-
-
-
-
   def createSession(conf: SparkConf, warehouseLocation: String) = {
 
     SparkSession
@@ -75,7 +50,7 @@ object TwitterApp {
 
   def writeToHdfs(df: DataFrame, hdfsDataDir: String, tableName: String) = {
     df.write
-      .mode(SaveMode.Overwrite)
+      .mode(SaveMode.Append)
       .option("path", s"${hdfsDataDir}/$tableName")
       .format("hive")
       .saveAsTable(tableName)
@@ -141,23 +116,6 @@ object TwitterApp {
 
     type TWIT =  (Long, (Int, Int, Option[String], String))
 
-    val shortTwits = twits.filter { t =>
-      Option(t.getQuotedStatus).isDefined
-    }
-      .map(t =>
-        t.getId -> (
-          t.getFavoriteCount,
-          t.getRetweetCount,
-          Option(t.getPlace).map(_.getCountry),
-          t.getText,
-          t.isRetweet,
-          t.getQuotedStatusId,
-          Option(t.getRetweetedStatus).map(_.getId).getOrElse(-1L),
-          Option(t.getQuotedStatus).map(_.getText).getOrElse(""),
-          Option(t.getRetweetedStatus).flatMap(t => Option(t.getPlace)).map(_.getCountry).getOrElse("")
-        )
-      )
-
     val mostPopularTwitsSchema =
       StructType(
         StructField("country", StringType, true) ::
@@ -167,8 +125,8 @@ object TwitterApp {
 
     def maxCount(a: (String, Long), b: (String, Long)): (String, Long) = if(a._1 > b._1) a else b
 
-    val windowDuration = Minutes(60)
-    val slideDuration = Minutes(10)
+    val windowDuration = Minutes(6)
+    val slideDuration = Minutes(1)
 
     val mostPopularTwits = twits
       .map(t =>
