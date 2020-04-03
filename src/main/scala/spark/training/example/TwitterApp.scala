@@ -26,6 +26,7 @@ object TwitterApp {
   //todo:
   // CREATE TABLE IF NOT EXISTS twits ( latitude decimal, longitude decimal, country string, place string, text string ) LOCATION 'hdfs://sandbox-hdp.hortonworks.com/user/shredinger/output/test/twits'
   // CREATE EXTERNAL TABLE IF NOT EXISTS popular_twits ( country string, twit string, quotesCount bigint ) LOCATION 'hdfs://sandbox-hdp.hortonworks.com/user/shredinger/output/twits/popular_twits'
+  // CREATE EXTERNAL TABLE IF NOT EXISTS top_twits ( country string, twit1 string, rating1 bigint, twit2 string, rating2 bigint, twit3 string, rating3 bigint ) LOCATION 'hdfs://sandbox-hdp.hortonworks.com/user/shredinger/output/twits/top_twits'
 
 
   private def initSystemProperties(args: Array[String]) = {
@@ -50,7 +51,7 @@ object TwitterApp {
 
   def writeToHdfs(df: DataFrame, hdfsDataDir: String, tableName: String) = {
     df.write
-      .mode(SaveMode.Append)
+      .mode(SaveMode.Overwrite)
       .option("path", s"${hdfsDataDir}/$tableName")
       .format("hive")
       .saveAsTable(tableName)
@@ -123,26 +124,52 @@ object TwitterApp {
         StructField("quotesCount", LongType, true) :: Nil
       )
 
+    val topTwitsSchema =
+      StructType(
+        StructField("country", StringType, true) ::
+          StructField("twit1", StringType, true) ::
+          StructField("rating1", LongType, true) ::
+          StructField("twit2", StringType, true) ::
+          StructField("rating2", LongType, true) ::
+          StructField("twit3", StringType, true) ::
+          StructField("rating3", LongType, true) :: Nil
+
+      )
+
+
     def maxCount(a: (String, Long), b: (String, Long)): (String, Long) = if(a._1 > b._1) a else b
 
-    val windowDuration = Minutes(6)
-    val slideDuration = Minutes(1)
+    val windowDuration = Minutes(60)
+    val slideDuration = Seconds(20)
 
     val mostPopularTwits = twits
       .map(t =>
         Option(t.getPlace).map(_.getCountry).getOrElse("") ->  Option(t.getQuotedStatus).map(_.getText).getOrElse("")
-      ).countByValueAndWindow(windowDuration, slideDuration)
-      .map { case ((country, quotedTwit), count) => country -> (quotedTwit, count) }
-      .reduceByKeyAndWindow(maxCount(_, _), windowDuration, slideDuration)
+      )
+      .filter { case (_, quotedTwit) => Option(quotedTwit).exists(_.nonEmpty) }
+      .countByValueAndWindow(windowDuration, slideDuration)
+      .map { case ((country, quotedTwit), count) => country -> (quotedTwit -> count) }
+      .groupByKeyAndWindow(windowDuration, slideDuration)
+      .mapValues { twitsForCountry =>
+        twitsForCountry.toSeq
+          .groupBy(_._1)
+          .mapValues(_.map(_._2).sum)
+          .toSeq
+            .sortWith( (a, b) => a._2 > b._2 ).take(5)
+      }
 
-    saveStream(session, warehouseLocation, "popular_twits1")(mostPopularTwits)(mostPopularTwitsSchema) {
-      case (country, (twit, count)) => Row(country, twit, count)
-    }
+    saveStream(session, warehouseLocation, "top_twits")(mostPopularTwits)(topTwitsSchema) {
+      case (country, twits) => Row.fromSeq {
+        val s =
+          country +: (0 to 2).flatMap(i =>
+            twits.map { case (w, c) => Seq(w, c) }.applyOrElse(i, (_: Int) => Seq("", -1L))
+          )
+        println(s)
+        s
+      }
+    }                                                               
 
-//    saveStream(session, warehouseLocation, "retweets")(shortTwits)(twitsSchema) {
-//      case (_, (favourites, retweets, country, text, isRetweet, quotedId, retweetedId, retweetText, retweetCountry)) =>
-//        Row(favourites, retweets, country.getOrElse("N/A"), text, isRetweet, quotedId, retweetedId, retweetText, retweetCountry)
-//    }
+
 
     twits.start()
     ssc.start()

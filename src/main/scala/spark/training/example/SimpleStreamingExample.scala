@@ -88,10 +88,6 @@ runStream(words.toSeq, 50) { words =>
       rdd.foreach(_.foreach(println))
     }
 
-
-
-
-
 }
 
 
