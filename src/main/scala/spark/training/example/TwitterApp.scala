@@ -139,8 +139,8 @@ object TwitterApp {
 
     def maxCount(a: (String, Long), b: (String, Long)): (String, Long) = if(a._1 > b._1) a else b
 
-    val windowDuration = Minutes(60)
-    val slideDuration = Seconds(20)
+    val windowDuration = Minutes(240)
+    val slideDuration = Seconds(60)
 
     val mostPopularTwits = twits
       .map(t =>
@@ -155,14 +155,18 @@ object TwitterApp {
           .groupBy(_._1)
           .mapValues(_.map(_._2).sum)
           .toSeq
-            .sortWith( (a, b) => a._2 > b._2 ).take(5)
+            .sortWith( (a, b) => a._2 > b._2 )
+            .take(5)
+            .filter{
+              case (w, c) => Option(w).exists(_.nonEmpty) && Option(c).exists(_ > 0)
+            }
       }
 
     saveStream(session, warehouseLocation, "top_twits")(mostPopularTwits)(topTwitsSchema) {
-      case (country, twits) => Row.fromSeq {
+      case (country, topTwits) => Row.fromSeq {
         val s =
           country +: (0 to 2).flatMap(i =>
-            twits.map { case (w, c) => Seq(w, c) }.applyOrElse(i, (_: Int) => Seq("", -1L))
+            topTwits.map { case (w, c) => Seq(w, c) }.applyOrElse(i, (_: Int) => Seq("", -1L))
           )
         println(s)
         s
