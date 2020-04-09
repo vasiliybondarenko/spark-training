@@ -21,7 +21,7 @@ object SparkCluster {
     val master0 = "spark://192.168.160.245:7077"
     val master1 = "spark://vbondarenko-mac.local:7077"
 
-    val master = if(args.length == 0) "local" else master1
+    val master = if (args.length == 0) "local" else master1
 
     val spark = SparkSession
       .builder()
@@ -44,13 +44,9 @@ object SparkCluster {
           )
         }
         .collect { case Success(value) => value }
-        .map { x =>
-          x.split(",")
-        }
+        .map { x => x.split(",") }
         .filter(_.size > 14)
-        .map { fields =>
-          fields(5) -> (fields(8) -> fields(14))
-        }
+        .map { fields => fields(5) -> (fields(8) -> fields(14)) }
         .filter(x => x._1.matches("[0-9]+"))
         .map { case (mId, (title, date)) => mId.toInt -> (title -> date) }
     }
@@ -78,7 +74,5 @@ object SparkCluster {
 
     spark.stop()
   }
-  
-                           
 
 }
